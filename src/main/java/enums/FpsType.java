@@ -5,7 +5,7 @@ package enums;
  */
 public enum FpsType implements BaseEnum<FpsType, String> {
     LOGIN_HEARTBEAT_NOPOWER("00", "登录，心跳，失电报警"),TIMING("09", "校时"), INIT("03", "初始化"), RESTART("04", "重启"),
-    INTERVAL("01", "设置采集频率");
+    INTERVAL("01", "设置采集频率"), BEIWEI_DATA("39", "北微倾角数据");
 
     /* 标识码 */
     private String sourceCode;
@@ -32,6 +32,7 @@ public enum FpsType implements BaseEnum<FpsType, String> {
             case 3 : return INIT;
             case 4 : return RESTART;
             case 9 : return TIMING;
+            case 39 : return BEIWEI_DATA;
             default : throw new RuntimeException("未知枚举类型");
         }
     }

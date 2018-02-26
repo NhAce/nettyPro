@@ -8,6 +8,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.serialization.ObjectDecoder;
 import io.netty.handler.codec.serialization.ObjectEncoder;
 import org.apache.log4j.Logger;
 import rabbitMQ.Producer;
@@ -61,7 +62,7 @@ public class Server {
                      * 连接数并无影响，backlog影响的只是还没有被accept取出的连接
                      */
                     .option(ChannelOption.SO_BACKLOG, 128)
-                    .option(ChannelOption.SO_KEEPALIVE, true);
+                    .childOption(ChannelOption.SO_KEEPALIVE, true);
 
             ChannelFuture f = b.bind(port).sync();
             logger.info("listening on port: " + port);
