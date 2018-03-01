@@ -4,25 +4,34 @@ package enums;
  * Created by Administrator on 2018/2/8 0008.
  */
 public enum FpsType implements BaseEnum<FpsType, String> {
-    LOGIN_HEARTBEAT_NOPOWER("00", "登录，心跳，失电报警"),TIMING("09", "校时"), INIT("03", "初始化"), RESTART("04", "重启"),
-    INTERVAL("01", "设置采集频率"), BEIWEI_DATA("39", "北微倾角数据");
+    LOGIN_HEARTBEAT_NOPOWER("C9", "00", "登录，心跳，失电报警"),TIMING("5C", "09", "校时"), INIT("5D", "03", "初始化"),
+    RESTART("5D", "04", "重启"), INTERVAL("5C", "01", "设置采集频率"), BEIWEI_DATA("5A", "39", "北微倾角数据"),
+    CHANGE_CONFIG("5C", "28", "修改汇集器配置"), INCLINOMETER_ISSUED("5C", "52", "倾角仪表计下发"),
+    INCLINOMETER_CANCEL("5C", "53", "倾角仪表计取消");
 
-    /* 标识码 */
-    private String sourceCode;
+    /* 控制字 */
+    private String controlWord;
+    /* 帧类型 */
+    private String type;
     /* 中文名 */
-    private String sourceName;
+    private String name;
 
-    FpsType(String sourceCode, String sourceName) {
-        this.sourceCode = sourceCode;
-        this.sourceName = sourceName;
+    FpsType(String controlWord, String type, String name) {
+        this.controlWord = controlWord;
+        this.type = type;
+        this.name = name;
     }
 
-    public String getNo() {
-        return sourceCode;
+    public String getControlWord() {
+        return controlWord;
+    }
+
+    public String getType() {
+        return type;
     }
 
     public String getName() {
-        return sourceName;
+        return name;
     }
 
     public FpsType getProperty(String value) {

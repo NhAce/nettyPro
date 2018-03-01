@@ -23,4 +23,12 @@ public interface Const {
      * 重启
      */
     String RESTART = "restart";
+    /**
+     * 倾角仪表计下发
+     */
+    String INCLINOMETER_ISSUED = "issued";
+    /**
+     * 倾角仪表计取消
+     */
+    String INCLINOMETER_CANCEL = "cancel";
 }

@@ -26,36 +26,54 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ServerHandler extends ChannelInboundHandlerAdapter {
     private Producer producer;
     private int queueNum;
+    private int timingInterval;
     private static final Logger logger = Logger.getLogger(ServerHandler.class);
-    public ServerHandler(Producer producer, int queueNum){
-        this.producer = producer;
-        this.queueNum = queueNum;
-    }
     private static final AtomicInteger no = new AtomicInteger(0);
     private boolean timingSuccess = false;
     private String GPRSCode = null;
-//    private Date loginTime = null;
+
+    private boolean init = false;
+    private boolean restart = false;
+
+    public ServerHandler(Producer producer, int queueNum, int timingInterval){
+        this.producer = producer;
+        this.queueNum = queueNum;
+        this.timingInterval = timingInterval;
+    }
+
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         ByteBuf result = (ByteBuf)msg;
         String resultStr = ByteBufUtil.hexDump(result);
-        no.incrementAndGet();
-        logger.info("Client said: " + resultStr + " length: " + resultStr.length() + " no: " + no);
+//        no.incrementAndGet();
+        logger.info("Client said: " + resultStr + " length: " + resultStr.length());
+        test(ctx);
         if (!StringUtils.isEmpty(resultStr)) {
             if (resultStr.length() == 40 && resultStr.substring(22, 24)
-                    .equals(FpsType.LOGIN_HEARTBEAT_NOPOWER.getNo())) { //登录帧，心跳帧，失电报警
+                    .equals(FpsType.LOGIN_HEARTBEAT_NOPOWER.getType())) { //登录帧，心跳帧，失电报警
                 dealWithBasicInfo(ctx, resultStr);
-            } else if (resultStr.length() == 36 && resultStr.substring(18, 20)
-                    .equals(FpsType.TIMING.getNo())){
+            } else if (resultStr.length() == 36 && resultStr.substring(18, 20)//校时
+                    .equals(FpsType.TIMING.getType())){
                 dealWithTimingInfo(ctx, resultStr);
+            } else if (resultStr.length() == 58 && resultStr.substring(18, 20)//修改汇集器配置回复帧
+                    .equals(FpsType.CHANGE_CONFIG.getType())) {
+                logger.info("receive change config response: " + resultStr);
+            } else if (resultStr.length() == 36 && resultStr.substring(18, 20)//设置采集频率回复帧
+                    .equals(FpsType.INTERVAL.getType())) {
+                logger.info("receive interval response: " + resultStr);
+            } else if (resultStr.length() == 36 && resultStr.substring(18, 20)//初始化回复帧
+                    .equals(FpsType.INIT.getType())) {
+                init = true;
+                logger.info("receive init response: " + resultStr);
+            } else if (resultStr.length() == 24 && resultStr.substring(18, 20)//重启回复帧
+                    .equals(FpsType.RESTART.getType())) {
+                restart = true;
+                logger.info("receive restart response: " + resultStr);
             } else if (resultStr.length() == 60 && resultStr.substring(18, 20)
-                    .equals(FpsType.BEIWEI_DATA.getNo())){
+                    .equals(FpsType.BEIWEI_DATA.getType())){
                 dealWithBeiweiData(ctx, resultStr);
             }
         }
-        ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-        channels.size();
-//        ctx.writeAndFlush("1234567");
 //        producer.sendMessage(resultStr, no.get(), queueNum);
         result.release();
     }
@@ -68,8 +86,8 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         //出现异常的时候关闭连接
-        cause.printStackTrace();
         ctx.close();
+        logger.error(cause.getMessage());
     }
 
     /**
@@ -171,9 +189,15 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
         String response = StringUtils.join(strArr);
         GPRSCode = strArr[8] + strArr[7] + strArr[10] + strArr[9];
         if (Const.LOGIN.equals(fpsType2)) {//登录帧
+            Channel channel = ChannelGroups.find(GPRSCode);
+            if (channel != null) {
+                logger.info("关闭 channel");
+                channel.close();
+            }
             writeToClient(response, ctx, "登录帧下行： " + response);
             ChannelGroups.add(GPRSCode, ctx.channel());
             outputTimingInfo(ctx);
+//            test(ctx);
         } else if (Const.HEART_BEAT.equals(fpsType2)) {//心跳帧
             writeToClient(response, ctx, "心跳帧下行： " + response);
         } else if (Const.NO_POWER_ALARM.equals(fpsType2)){//失电报警
@@ -188,13 +212,14 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
      * @param info
      */
     private void dealWithTimingInfo(ChannelHandlerContext ctx, String info) {
+        logger.info("处理校时信息： " + info);
         if (!timingSuccess) {
             String[] strArr = new String[info.length() / 2];
             for (int i = 0; i < info.length() / 2; i++) {
                 strArr[i] = info.substring(i * 2, (i + 1) * 2);
             }
             String controlWord = strArr[4];
-            if (!"DC".equalsIgnoreCase(controlWord)) {
+            if (FpsType.TIMING.getControlWord().equals(controlWord)) {//对汇集器上发的校时指令进行回复
                 String[] timing = timing();
                 for (int i = 0; i < timing.length; i++) {
                     strArr[i + 10] = timing[i];
@@ -203,9 +228,10 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
                 System.arraycopy(strArr, 3, newStrArray, 0, 13);
                 strArr[16] = makeCheckSum(newStrArray);
                 String response = StringUtils.join(strArr);
-                writeToClient(response, ctx, "校时下行：" + response);
-            }else {
+                writeToClient(response, ctx, "校时下行： " + response);
+            }else {//收到汇集器校时成功指令，取消主动下发的校时任务
                 timingSuccess = true;
+                logger.info("校时成功");
             }
         }
     }
@@ -221,29 +247,65 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
             public void run() {
                 if (timingSuccess){
                     timer.cancel();
-                    logger.info("GPRS编号" + GPRSCode + "的主动校时任务停止");
+                    logger.info("GPRS编号" + GPRSCode + "的主动校时任务停止.");
                 }else {
-                    String[] timing = timing();
-                    String info = "680C0C685C" + GPRSCode + "09" + StringUtils.join(timing) + "0016";
-                    String[] strArr = new String[info.length() / 2];
-                    for (int i = 0; i < info.length() / 2; i++) {
-                        strArr[i] = info.substring(i * 2, (i + 1) * 2);
+                    if (ctx.channel().isOpen()) {
+                        String[] timing = timing();
+                        //校验和先用 00 占位，后面拿计算出来的值替换
+                        String info = "680C0C685C" + GPRSCode + "09" + StringUtils.join(timing) + "0016";
+                        String[] strArr = new String[info.length() / 2];
+                        for (int i = 0; i < info.length() / 2; i++) {
+                            strArr[i] = info.substring(i * 2, (i + 1) * 2);
+                        }
+                        String[] newStrArray = new String[13];
+                        System.arraycopy(strArr, 3, newStrArray, 0, 13);
+                        strArr[16] = makeCheckSum(newStrArray);//重新计算校验码
+                        String response = StringUtils.join(strArr);
+                        writeToClient(response, ctx, "主动下发校时信息： " + response);
+                    } else {
+                        timer.cancel();
                     }
-                    String[] newStrArray = new String[13];
-                    System.arraycopy(strArr, 3, newStrArray, 0, 13);
-                    strArr[16] = makeCheckSum(newStrArray);//重新计算校验码
-                    String response = StringUtils.join(strArr);
-                    writeToClient(response, ctx, "主动下发校时信息：" + response);
                 }
             }
-        }, 30000, 30000);
+        }, timingInterval, timingInterval);
     }
 
+    private void test(final ChannelHandlerContext ctx) {
+        final Timer timer = new Timer();
+        timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                if (ctx.channel().isOpen()) {
+                    logger.info("ChannelGroups size: " + ChannelGroups.size());
+                    logger.info("is Channel open: " + ctx.channel().isOpen());
+                } else {
+                    timer.cancel();
+                    logger.info("test 定时任务停止。");
+                }
+            }
+        }, 60000, 60000);
+    }
     /**
      * 处理北微倾角传感器上传的数据
      */
     private void dealWithBeiweiData(ChannelHandlerContext ctx, String data) {
         logger.info(data);
+        String[] strArr = new String[data.length() / 2];
+        for (int i = 0; i < data.length() / 2; i++) {
+            strArr[i] = data.substring(i * 2, (i + 1) * 2);
+        }
+        String gorge = strArr[10];
+        String collectAddress = strArr[11] + strArr[12];
+        String producer = strArr[13];
+        String xStr = strArr[17] + strArr[16] + strArr[15] + strArr[14];
+        String yStr = strArr[21] + strArr[20] + strArr[19] + strArr[18];
+        float x = Float.intBitsToFloat(Integer.parseInt(xStr, 16));
+        float y = Float.intBitsToFloat(Integer.parseInt(yStr, 16));
+        StringBuilder time = new StringBuilder();
+        for (int i = 22; i < 28; i++){
+            time = time.append(Integer.parseInt(strArr[i], 16));
+        }
+
     }
 
     private void changeConcentratorConfig(String originAddress, String newAddress,
@@ -269,7 +331,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
         }
         sb = sb.append("03");
         String[] strArr = new String[24];
-        generateAndOutputData(sb, strArr, originAddress);
+        generateAndOutputData(sb, strArr, originAddress, "修改汇集器配置: ");
     }
 
     private void changeFrequency (String frequency, String originAddress) {
@@ -279,44 +341,84 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
             sb = sb.append(originAddress).append("01");
             String[] arg1 = new String[2];
             String[] arg2 = new String[2];
+            arg2[0] = frequency.substring(2);
+            arg2[1] = "33";
             if (frequency.length() == 3) {
                 arg1[0] = frequency.substring(0, 1);
                 arg1[1] = "33";
-                arg2[0] = frequency.substring(2);
-                arg2[1] = "33";
             }else if (frequency.length() == 4) {
                 arg1[0] = frequency.substring(0, 2);
                 arg1[1] = "33";
-                arg2[0] = frequency.substring(2);
-                arg2[1] = "33";
             }
             sb = sb.append(makeCheckSum(arg2)).append(makeCheckSum(arg1)).append("00333300");
             String[] strArr = new String[13];
-            generateAndOutputData(sb, strArr, originAddress);
+            generateAndOutputData(sb, strArr, originAddress, "设置采集频率: ");
         }
     }
 
     private void initAndRestart(String originAddress, String operateType) {
         StringBuilder sb = new StringBuilder("680606685D");
+        String log = null;
         if (Const.INIT.equals(operateType)) {
             sb = sb.append(originAddress).append("03");
+            log = "下发初始化指令: ";
         } else if (Const.RESTART.equals(operateType)) {
             sb = sb.append(originAddress).append("04");
+            log = "下发重启指令: ";
         }
         String[] strArr = new String[7];
-        generateAndOutputData(sb, strArr, originAddress);
+        generateAndOutputData(sb, strArr, originAddress, log);
     }
 
-    private void generateAndOutputData(StringBuilder sb, String[] strArr, String originAddress) {
+    private void inclinometerOperation(String originAddress, String gorge, String collectAddress, String producer, String operateType) {
+        StringBuilder sb = new StringBuilder("680A0A685C");
+        String log = null;
+        if (Const.INCLINOMETER_ISSUED.equals(operateType)){
+            sb = sb.append(originAddress).append("52");
+            log = "倾角仪表计下发: ";
+        } else if (Const.INCLINOMETER_CANCEL.equals(operateType)){
+            sb = sb.append(originAddress).append("53");
+            log = "倾角仪表计取消: ";
+        }
+        sb = sb.append(gorge).append(collectAddress).append(producer);
+        String[] strArr = new String[11];
+        generateAndOutputData(sb, strArr, originAddress, log);
+    }
+
+    private void generateAndOutputData(StringBuilder sb, String[] strArr, String originAddress, String log) {
         String str = sb.toString().substring(6);
         for (int i = 0; i < str.length() / 2; i++) {
             strArr[i] = str.substring(i * 2, (i + 1) * 2);
         }
         sb = sb.append(makeCheckSum(strArr)).append(16);
+        logger.info(log + sb.toString());
         Channel channel = ChannelGroups.find(originAddress);
         ByteBuf buff = Unpooled.buffer();//netty需要用ByteBuf传输
         buff.writeBytes(hexStringToBytes(sb.toString()));//对接需要16进制
         channel.writeAndFlush(buff);
     }
 
+    @Override
+    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+        logger.info("channel Registered");
+        super.channelRegistered(ctx);
+    }
+
+    @Override
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        logger.info("channel Unregistered");
+        super.channelUnregistered(ctx);
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        logger.info("channel Active");
+        super.channelActive(ctx);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        logger.info("channel Inactive");
+        super.channelInactive(ctx);
+    }
 }

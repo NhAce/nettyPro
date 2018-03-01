@@ -8,7 +8,7 @@ public interface BaseEnum<T, S> {
      *
      * @return： 属性值
      */
-    public S getNo();
+    public S getType();
 
     /**
      * 获得属性的解释，用于输出

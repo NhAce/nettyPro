@@ -44,6 +44,9 @@ public class ChannelGroups {
     }
 
     public static Channel find(String code) {
-        return CHANNEL_GROUP.find(arg1.get(code));
+        if (arg1.get(code) != null) {
+            return CHANNEL_GROUP.find(arg1.get(code));
+        }
+        return null;
     }
 }

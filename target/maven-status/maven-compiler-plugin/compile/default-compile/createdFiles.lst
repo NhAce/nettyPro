@@ -1,3 +1,12 @@
+server\ServerHandler$3.class
+server\ServerHandler$2.class
+server\ServerHandler$1.class
 server\Server$1.class
+util\Const.class
 server\Server.class
+rabbitMQ\RabbitMQFactory.class
+enums\FpsType.class
+rabbitMQ\Producer.class
+enums\BaseEnum.class
+util\ChannelGroups.class
 server\ServerHandler.class

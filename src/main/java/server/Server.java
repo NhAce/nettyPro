@@ -1,10 +1,7 @@
 package server;
 
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -13,6 +10,7 @@ import io.netty.handler.codec.serialization.ObjectEncoder;
 import org.apache.log4j.Logger;
 import rabbitMQ.Producer;
 
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.util.Properties;
 
@@ -25,21 +23,14 @@ public class Server {
 
     public Server(){}
 
-    public Server(int port){
-        this.port = port;
-    }
-
-    public int getPort() {
-        return port;
-    }
-
     public void setPort(int port) {
         this.port = port;
     }
 
-    public void run(final Producer producer, final int queueNum) throws Exception{
+    public void run(final Producer producer, final int queueNum, final int timingInterval) throws Exception{
         EventLoopGroup bossGroup = new NioEventLoopGroup();//用于处理服务器端接收客户端连接
         EventLoopGroup workerGroup = new NioEventLoopGroup();//进行网络通信（读写）
+
         try {
             ServerBootstrap b = new ServerBootstrap();
             b.group(bossGroup, workerGroup)
@@ -47,8 +38,7 @@ public class Server {
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         protected void initChannel(SocketChannel socketChannel) throws Exception {
                             socketChannel.pipeline().addLast(new ObjectEncoder());
-                            socketChannel.pipeline().addLast(new ServerHandler(producer, queueNum));
-
+                            socketChannel.pipeline().addLast(new ServerHandler(producer, queueNum, timingInterval));
                         }
                     })
                     /**
@@ -67,7 +57,6 @@ public class Server {
             ChannelFuture f = b.bind(port).sync();
             logger.info("listening on port: " + port);
             f.channel().closeFuture().sync();
-
         }finally {
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
@@ -76,15 +65,15 @@ public class Server {
     public static void main(String[] args) throws Exception{
         Server server = new Server();
         InputStream inputStream = server.getClass().getClassLoader().getResourceAsStream("config.properties");
-        Properties properties = new Properties();
-        try {
-            properties.load(inputStream);
-        }catch (Exception e){
-            e.printStackTrace();
+        if (inputStream == null) {
+            inputStream = new FileInputStream("config.properties");
         }
-        Producer producer = init(properties);
+        Properties properties = new Properties();
+        properties.load(inputStream);
+//        Producer producer = init(properties);
+
         server.setPort(Integer.valueOf(properties.getProperty("severPort")));
-        server.run(producer, Integer.valueOf(properties.getProperty("queue_num")));
+        server.run(null, Integer.valueOf(properties.getProperty("queue_num")), Integer.valueOf(properties.getProperty("timing_interval")));
     }
 
     public static Producer init(Properties properties) throws Exception{
